@@ -9,9 +9,14 @@ class Config:
     vaults: List[str] = field(default_factory=list)
     text_sources: List[str] = field(default_factory=list)
     model_name: str = "mistral:latest"
-    embedding_model_name: str = "all-MiniLM-L6-v2"
+    embedding_model_name: str = "all-mpnet-base-v2"
     obsidian_root: Optional[str] = None
-    mnemosyne_vault_guidance: List[Dict[str, str]] = field(default_factory=list)
+    mnemosyne_vault_guidance: List[Dict[str, str]] = field(default_factory=lambda: [
+        {"category": "Personal", "vault": "Jack-Rich"},
+        {"category": "Work and office-related inquiries", "vault": "Macquarie"},
+        {"category": "DevOps Engineering", "vault": "DevOps Engineer"},
+        {"category": "Quick notes and general information", "vault": "Heynote"}
+    ])
     
     # Performance settings
     use_cache: bool = True

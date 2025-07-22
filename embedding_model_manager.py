@@ -13,6 +13,9 @@ class EmbeddingModelManager:
     _lock = threading.Lock()
     _models: Dict[str, SentenceTransformer] = {}
     
+    def __init__(self):
+        logger.debug("EmbeddingModelManager initialized.")
+
     def __new__(cls):
         if cls._instance is None:
             with cls._lock:
@@ -22,17 +25,18 @@ class EmbeddingModelManager:
     
     def get_model(self, model_name: str) -> SentenceTransformer:
         """Get or create an embedding model instance."""
+        logger.debug(f"EmbeddingModelManager.get_model received request for model: {model_name}")
+        
+        # Clear all models to ensure a fresh load, especially during debugging
+        self.clear_all_models()
+
         if model_name not in self._models:
             with self._lock:
                 if model_name not in self._models:
                     logger.info(f"Loading embedding model: {model_name}")
                     try:
-                        # Configure device - prefer MPS on Apple Silicon, fallback to CPU
-                        device = 'cpu'  # Default to CPU for stability
-                        if torch.backends.mps.is_available():
-                            device = 'mps'
-                        elif torch.cuda.is_available():
-                            device = 'cuda'
+                        # Force CPU for debugging embedding quality
+                        device = 'cpu'
                         
                         # Load model with explicit device configuration
                         model = SentenceTransformer(model_name, device=device)
@@ -79,5 +83,3 @@ class EmbeddingModelManager:
             self._models.clear()
             logger.info(f"Cleared all {model_count} embedding models")
 
-# Global instance
-embedding_manager = EmbeddingModelManager()

@@ -5,15 +5,17 @@ import logging
 import uuid
 from pathlib import Path
 import numpy as np
-from embedding_model_manager import embedding_manager
+# Removed: from embedding_model_manager import embedding_manager
 
 logger = logging.getLogger(__name__)
 
 class VectorStoreManager:
     def __init__(self, embedding_model_name: str = "all-MiniLM-L6-v2", 
                  collection_name: str = "obsidian_documents", 
-                 chroma_path: str = "./chroma_db/data"):
+                 chroma_path: str = "./chroma_db/data",
+                 embedding_manager = None): # Added embedding_manager parameter
         """Initialize the vector store manager with ChromaDB and SentenceTransformers."""
+        logger.debug(f"VectorStoreManager initialized with embedding_model_name: {embedding_model_name}")
         self.embedding_model_name = embedding_model_name
         self.collection_name = collection_name
         self.chroma_path = Path(chroma_path)
@@ -23,6 +25,8 @@ class VectorStoreManager:
         self.chroma_client = chromadb.PersistentClient(path=str(self.chroma_path))
         
         # Get shared embedding model instance
+        if embedding_manager is None:
+            raise ValueError("embedding_manager must be provided to VectorStoreManager")
         self.embedding_model = embedding_manager.get_model(embedding_model_name)
         
         # Get or create collection
@@ -52,7 +56,8 @@ class VectorStoreManager:
             batch_ids = ids[i:i + batch_size]
             
             # Generate embeddings for batch
-            embeddings = self.embedding_model.encode(batch_docs, show_progress_bar=False)
+            embeddings = self.embedding_model.encode(batch_docs, show_progress_bar=False, num_workers=0)
+            logger.debug(f"Generated embeddings shape: {embeddings.shape}, first 5 values: {embeddings.flatten()[:5]}")
             
             # Convert to list format for ChromaDB
             if isinstance(embeddings, np.ndarray):

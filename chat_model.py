@@ -10,9 +10,10 @@ class ChatModel:
     def __init__(self, model_name: str = "mistral:latest", 
                  embedding_model_name: str = "all-MiniLM-L6-v2",
                  mnemosyne_vault_guidance: List[Dict[str, str]] = None,
-                 use_cache: bool = True,
+                 use_cache: bool = False,
                  cache_similarity_threshold: float = 0.95,
-                 dynamic_context: bool = True):
+                 dynamic_context: bool = True,
+                 embedding_manager = None):
         """Initialize the chat model with Ollama connection pooling and optional caching."""
         self.model_name = model_name
         self.embedding_model_name = embedding_model_name
@@ -28,7 +29,8 @@ class ChatModel:
         if self.use_cache:
             self.cache = LLMCache(
                 collection_name="mnemosyne_chat_cache",
-                embedding_model_name=embedding_model_name
+                embedding_model_name=embedding_model_name,
+                embedding_manager=embedding_manager
             )
         else:
             self.cache = None
@@ -60,9 +62,9 @@ Sources:
 
 When referencing information from the user's notes, always mention the source file when possible."""
         if self.mnemosyne_vault_guidance:
-            vault_guidance = "\n\nVault Organization Guidance:\n"
+            vault_guidance = "\n\n**Vault Organization Guidance:**\n"
             for guidance in self.mnemosyne_vault_guidance:
-                vault_guidance += f"- {guidance['category']}: Use vault '{guidance['vault']}'\n"
+                vault_guidance += f"- **{guidance['category']}**: Use vault '{guidance['vault']}' for queries related to this category.\n"
             base_prompt += vault_guidance
         return base_prompt
     
@@ -107,6 +109,7 @@ When referencing information from the user's notes, always mention the source fi
             )
             
             generated_text = response["response"]
+            logger.info(f"Raw LLM response: {generated_text}")
             
             # Cache the response if caching is enabled
             if self.cache and generated_text:
@@ -150,7 +153,7 @@ When referencing information from the user's notes, always mention the source fi
         
         # Add the current user prompt
         parts.append(f"\n## Your Query\nUser: {user_prompt}")
-        parts.append("\n## Your Answer\nMnemosyne:")
+        parts.append("\n## Your Answer\nAnswer the user's query directly and comprehensively based on the provided context.")
         
         full_prompt = "\n".join(parts)
         

@@ -10,7 +10,7 @@ import uuid
 import logging
 import asyncio
 from functools import partial
-from embedding_model_manager import embedding_manager
+# Removed: from embedding_model_manager import embedding_manager
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -45,8 +45,14 @@ class LLMCache:
         now = datetime.now(tz)
         return now.strftime("%Y-%m-%d %H:%M:%S")
 
-    def __init__(self, collection_name: str = "llm_cache_collection", embedding_model_name: str = "all-MiniLM-L6-v2", chroma_path: str = "./chroma_db/llm_cache_data", max_entries: int = 10000):
-        self.chroma_client = chromadb.PersistentClient(path=chroma_path)
+
+    def __init__(self, collection_name: str, embedding_model_name: str, embedding_manager = None, max_entries: int = 10000):
+        self.chroma_client = chromadb.PersistentClient(path="./chroma_db/llm_cache_data")
+        """Initialize the LLM cache with ChromaDB and SentenceTransformers."""
+        """Initialize the LLM cache with ChromaDB and SentenceTransformers."""
+        """Initialize the LLM cache with ChromaDB and SentenceTransformers."""
+        if embedding_manager is None:
+            raise ValueError("embedding_manager must be provided to LLMCache")
         self.embedding_model = embedding_manager.get_model(embedding_model_name)
         self.max_entries = max_entries
         try:

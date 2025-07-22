@@ -19,6 +19,8 @@ from rich.console import Console
 import ollama
 import logging
 
+logger = logging.getLogger(__name__)
+
 # Disable ChromaDB telemetry
 os.environ["ANONYMIZED_TELEMETRY"] = "False"
 os.environ["CHROMA_TELEMETRY_DISABLED"] = "True"
@@ -27,6 +29,9 @@ os.environ["CHROMA_TELEMETRY_DISABLED"] = "True"
 logging.getLogger('chromadb').setLevel(logging.CRITICAL)
 logging.getLogger('sentence_transformers').setLevel(logging.WARNING)
 
+# Set logging level for chat_interface to DEBUG
+logging.getLogger('chat_interface').setLevel(logging.DEBUG)
+
 
 from config import load_config, Config
 from vault_manager import VaultManager
@@ -34,6 +39,11 @@ from vector_store_manager import VectorStoreManager
 from memory_manager import MemoryManager
 from chat_model import ChatModel
 from chat_interface import ChatInterface
+
+from embedding_model_manager import EmbeddingModelManager
+
+# Global instance
+embedding_manager = EmbeddingModelManager()
 
 class ObsidianRAG:
     def __init__(self, config: Config):
@@ -54,9 +64,13 @@ class ObsidianRAG:
         chroma_data_path.mkdir(parents=True, exist_ok=True)
 
         # Initialize managers with configuration
+        logger.debug(f"Configured embedding model name: {self.config.embedding_model_name}")
         vector_store_manager = VectorStoreManager(
-            embedding_model_name=self.config.embedding_model_name
+            embedding_model_name=self.config.embedding_model_name,
+            embedding_manager=embedding_manager
         )
+        # Clear the collection to ensure fresh indexing
+        
         
         memory_manager = MemoryManager()
         await memory_manager.async_init()
@@ -65,9 +79,10 @@ class ObsidianRAG:
             model_name=self.config.model_name,
             embedding_model_name=self.config.embedding_model_name,
             mnemosyne_vault_guidance=self.config.mnemosyne_vault_guidance,
-            use_cache=self.config.use_cache,
+            use_cache=False,
             cache_similarity_threshold=self.config.cache_similarity_threshold,
-            dynamic_context=self.config.dynamic_context
+            dynamic_context=self.config.dynamic_context,
+            embedding_manager=embedding_manager
         )
         await chat_model.async_init()
         
@@ -89,7 +104,7 @@ class ObsidianRAG:
             await vault_manager.start_vault_scanning()
 
         # Start chat interface with configuration
-        chat_interface = ChatInterface(vault_manager, vector_store_manager, memory_manager, chat_model)
+        chat_interface = ChatInterface(vault_manager, vector_store_manager, memory_manager, chat_model, embedding_manager)
         chat_interface.base_context_results = self.config.base_context_results
         chat_interface.max_context_results = self.config.max_context_results
 
