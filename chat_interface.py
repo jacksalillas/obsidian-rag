@@ -328,7 +328,7 @@ class ChatInterface:
             conversation_history = await self.memory_manager.get_recent_conversation_history(limit=5)
 
             print()
-            print("💭 Thinking...")
+            self.console.print("[green]💭 Thinking...[/green]")
 
             # Show referencing notes only if there are relevant documents
             if relevant_docs:

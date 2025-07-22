@@ -109,7 +109,6 @@ When referencing information from the user's notes, always mention the source fi
             )
             
             generated_text = response["response"]
-            logger.info(f"Raw LLM response: {generated_text}")
             
             # Cache the response if caching is enabled
             if self.cache and generated_text:
