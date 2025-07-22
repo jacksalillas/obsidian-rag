@@ -47,20 +47,19 @@ class ChatModel:
 
 **Core Directives:**
 1.  **Synthesize, Don't Just List:** Do not simply list the source files or raw text. Synthesize the information from the provided context into a coherent and complete answer.
-2.  **Answer the Question Directly:** Address the user's query directly. Use the context from their notes as evidence to build your response.
+2.  **Answer the Question Directly:** Address the user's query directly. Integrate information from their notes naturally into your response.
 3.  **Cite Sources Clearly:** After providing the synthesized answer, cite the relevant source files in a clear and organized manner (e.g., "Source: `filename.md`"). This should be a supplement to the answer, not the answer itself.
 4.  **Be Context-Aware:** Pay attention to conversation history to understand follow-up questions and maintain context.
 5.  **Proactive Connections:** If you identify connections between different notes that are relevant to the user's query, highlight them.
 
 **Example Interaction:**
-User: "What are the key principles of Zettelkasten?"
-Mnemosyne: "The key principles of Zettelkasten, based on your notes, are atomicity, linking, and using a unique identifier for each note. Atomicity means each note should contain a single, discrete idea. This allows for more precise linking between concepts. Your notes in `Zettelkasten Principles.md` and `Note Taking Methods.md` both emphasize this core idea.
+User: "When did I start studying Spanish?"
+Mnemosyne: "You began studying Spanish on November 22, 2024. This information is detailed in your `spanish_studies.md` note.
 
 Sources:
-- `Zettelkasten Principles.md`
-- `Note Taking Methods.md`"
+- `spanish_studies.md`"
 
-When referencing information from the user's notes, always mention the source file when possible."""
+When referencing information from the user's notes, always mention the source file when possible, but integrate it smoothly into the answer rather than explicitly stating "based on your notes" or similar phrases in the main response."""
         if self.mnemosyne_vault_guidance:
             vault_guidance = "\n\n**Vault Organization Guidance:**\n"
             for guidance in self.mnemosyne_vault_guidance:
@@ -223,6 +222,24 @@ When referencing information from the user's notes, always mention the source fi
             logger.error(f"Error suggesting tags: {e}")
             return []
     
+    async def synthesize_memory(self, raw_memory_text: str, category: Optional[str] = None) -> str:
+        """Synthesize a raw memory text into a concise, AI-friendly format, optionally inferring category."""
+        category_hint = f" (Category: {category})" if category else ""
+        prompt = (
+            f"Please rephrase and condense the following text into a concise, factual statement "
+            f"that captures the core information. This statement will be used as a memory snippet "
+            f"for future reference. Focus on key entities, actions, and facts. "
+            f"Do not add any conversational filler or introductory phrases. "
+            f"Example: 'User asked about Spanish study duration, started Nov 22, 2024, lasted 8 months 10 days.'\n\n"
+            f"Text to synthesize{category_hint}: {raw_memory_text}"
+        )
+        try:
+            synthesized_text = await self.generate_response(prompt, temperature=0.3, max_tokens=100)
+            return synthesized_text.strip()
+        except Exception as e:
+            logger.error(f"Error synthesizing memory: {e}")
+            return f"Unable to synthesize memory: {str(e)}"
+
     async def check_model_availability(self) -> bool:
         """Check if the specified model is available in Ollama."""
         try:

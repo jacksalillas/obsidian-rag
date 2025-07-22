@@ -91,14 +91,14 @@ class ChatInterface:
             # Get system data
             vector_stats = self.vector_store_manager.get_collection_stats()
             cache_stats = await self.chat_model.get_cache_stats()
-            recent_conversations = await self.memory_manager.get_recent_conversation_history(limit=10)
+            saved_memories = await self.memory_manager.get_all_saved_memories()
             
             # Get vault names
             vault_names = [Path(path).name for path in self.vault_manager.source_paths]
             vault_names_str = ', '.join(vault_names) if vault_names else 'None'
             
             # Create content string with Rich markup - COLORS APPLIED HERE:
-            content = f"""[bold blue] Mnemosyne - Your Personal AI Assistant[/bold blue]\n\nSources: [cyan]{vault_names_str}[/cyan]\nPersonal Memories: [magenta]{len(recent_conversations)}[/magenta] saved\n\n✨ I can suggest file modifications - I'll ask for your permission first\n📝 I remember our conversation context for follow-up questions\n🧠 I remember personal details you teach me permanently\n\n[dim]Memory commands:[/dim] [yellow]'remember: ', 'show my memories'[/yellow]\n[dim]System commands:[/dim] [yellow]'status', 'reindex', 'bye', 'quit', 'exit', 'q'[/yellow]"""
+            content = f"""[bold blue] Mnemosyne - Your Personal AI Assistant[/bold blue]\n\nSources: [cyan]{vault_names_str}[/cyan]\nPersonal Memories: [magenta]{len(saved_memories)}[/magenta] saved\n\n✨ I can suggest file modifications - I'll ask for your permission first\n🧠 I remember personal details you teach me permanently\n\n[dim]Memory commands:[/dim] [yellow]'remember: ', 'show my memories'[/yellow]\n[dim]System commands:[/dim] [yellow]'status', 'reindex', 'bye', 'quit', 'exit', 'q'[/yellow]"""
             
             # Create and display the panel
             panel = Panel(
@@ -150,10 +150,42 @@ class ChatInterface:
             await self._show_detailed_stats()
             return True
             
-        elif command == 'clear':
-            if Confirm.ask("Are you sure you want to clear conversation history?"):
-                # Clear in-memory history (not persistent storage)
-                self.console.print("[yellow]Conversation history cleared for this session.[/yellow]")
+        elif command == 'remember':
+            if args:
+                category = None
+                memory_text = args
+                # Check for category: prefix
+                if ':' in args and args.split(':', 1)[0].isalpha():
+                    parts = args.split(':', 1)
+                    category = parts[0].strip().lower()
+                    memory_text = parts[1].strip()
+
+                if not memory_text:
+                    self.console.print("[red]Please provide text to remember. Example: /remember [category:] My favorite color is blue[/red]")
+                    return True
+
+                with self.console.status("[bold green]Synthesizing memory...[/bold green]", spinner="dots"):
+                    synthesized_memory = await self.chat_model.synthesize_memory(memory_text, category=category) # Pass category
+                if synthesized_memory:
+                    await self.memory_manager.add_saved_memory(synthesized_memory, category=category) # Pass category
+                    self.console.print(f"[green]✅ Memory saved (Category: {category or 'None'}): [italic]\"{synthesized_memory}\"[/italic][/green]")
+                else:
+                    self.console.print("[red]❌ Failed to synthesize and save memory.[/red]")
+            else:
+                self.console.print("[red]Please provide text to remember. Example: /remember [category:] My favorite color is blue[/red]")
+            return True
+            
+        elif command == 'show':
+            if args == 'my memories':
+                memories = await self.memory_manager.get_all_saved_memories()
+                if memories:
+                    self.console.print("\n[bold blue]Your Saved Memories:[/bold blue]")
+                    for i, mem in enumerate(memories, 1):
+                        self.console.print(f"[cyan]{i}.[/cyan] {mem['content']} [dim](Saved: {mem['timestamp'][:10]})[/dim]")
+                else:
+                    self.console.print("[yellow]No memories saved yet.[/yellow]")
+            else:
+                self.console.print(f"[red]Unknown 'show' command argument: {args}. Try 'show my memories'.[/red]")
             return True
             
         elif command == 'search':
@@ -194,7 +226,7 @@ class ChatInterface:
             cache_stats = await self.chat_model.get_cache_stats()
             
             # Memory stats
-            recent_history = await self.memory_manager.get_recent_conversation_history(limit=100)
+            saved_memories = await self.memory_manager.get_all_saved_memories()
             
             # Create detailed stats table
             table = Table(title="Detailed System Statistics", border_style="dim")
@@ -219,7 +251,7 @@ class ChatInterface:
                 table.add_row("Cache Status", "Disabled")
             
             # Memory
-            table.add_row("Conversation History", f"{len(recent_history)} entries")
+            table.add_row("Saved Memories", f"{len(saved_memories)} entries")
             
             # Vault information
             table.add_row("Watched Sources", str(len(self.vault_manager.source_paths)))
@@ -311,8 +343,36 @@ class ChatInterface:
             else:
                 context_k = self.base_context_results
 
+            # Determine if the query implies a specific memory category
+            implied_category = None
+            user_input_lower = user_input.lower()
+            if "personal" in user_input_lower or "my details" in user_input_lower:
+                implied_category = "personal"
+            elif "work" in user_input_lower or "job" in user_input_lower or "macquarie" in user_input_lower:
+                implied_category = "work"
+            # Add more category detection as needed
+
             # Search for relevant context
-            context_results = self.vector_store_manager.similarity_search(user_input, k=context_k)
+            obsidian_results = self.vector_store_manager.similarity_search(user_input, k=context_k, filter_dict={"type": "note"})
+            
+            memory_results = []
+            if implied_category:
+                # Search for memories within the implied category first
+                memory_results = self.vector_store_manager.similarity_search(user_input, k=context_k, filter_dict={"type": "saved_memory", "category": implied_category})
+                # If not enough results, broaden the memory search
+                if len(memory_results) < context_k / 2: # Arbitrary threshold
+                    memory_results.extend(self.vector_store_manager.similarity_search(user_input, k=context_k, filter_dict={"type": "saved_memory"}))
+            else:
+                # If no implied category, search all saved memories
+                memory_results = self.vector_store_manager.similarity_search(user_input, k=context_k, filter_dict={"type": "saved_memory"})
+            
+            # Combine and prioritize results
+            # Simple prioritization: if top memory result is very relevant, use more memories
+            if memory_results and memory_results[0].get('relevance_score', 0) > 0.8:
+                context_results = sorted(obsidian_results + memory_results, key=lambda x: x.get('relevance_score', 0), reverse=True)[:self.max_context_results]
+            else:
+                # Interleave or combine based on relevance
+                context_results = sorted(obsidian_results + memory_results, key=lambda x: x.get('relevance_score', 0), reverse=True)[:context_k]
 
             # Format context and filter by relevance
             context, relevant_docs = self._format_context_for_model(context_results)
@@ -324,8 +384,7 @@ class ChatInterface:
             else:
                 logger.info("No context being sent to LLM")
 
-            # Get conversation history
-            conversation_history = await self.memory_manager.get_recent_conversation_history(limit=5)
+            
 
             print()
             self.console.print("[green]💭 Thinking...[/green]")
@@ -341,7 +400,7 @@ class ChatInterface:
                         file_info.append({'name': file_name, 'relevance': relevance})
                 
                 file_display = ', '.join([f"{info['name']} ({info['relevance']:.2f})" for info in file_info])
-                print(f"📚 Referencing notes: {file_display}")
+                self.console.print(f"[bold magenta]📚 Referencing notes:[/bold magenta] {file_display}")
             else:
                 # If no relevant documents are found, inform the user and stop.
                 self.console.print("[yellow]I couldn't find any relevant notes to answer your question.[/yellow]")
@@ -355,11 +414,12 @@ class ChatInterface:
             response = await self.chat_model.generate_response(
                 user_input,
                 context=context,
-                conversation_history=conversation_history,
+                # conversation_history=conversation_history, # Removed
                 context_k=context_k
             )
 
             # Display response
+            self.console.print()
             enhanced_response = dim_sources_line(response)
             self.console.print(Panel(
                 enhanced_response, 
@@ -368,18 +428,7 @@ class ChatInterface:
                 border_style="cyan"
             ))
 
-            # Save to conversation history
-            await self.memory_manager.add_conversation_entry(
-                user_input,
-                response,
-                metadata={
-                    "context_results": len(relevant_docs), # Use count of relevant docs
-                    "context_k_used": context_k,
-                    "model": self.chat_model.model_name,
-                    "query_complexity": "complex" if is_complex else "question" if has_question else "simple",
-                    "relevance_scores": [r.get('relevance_score', 0) for r in relevant_docs[:3]]
-                }
-            )
+            
 
         except Exception as e:
             logger.error(f"Error processing user query: {e}")
@@ -399,19 +448,30 @@ class ChatInterface:
             
             # Use a lower threshold to be more inclusive (0.3 instead of 0.5)
             # Also ensure we include at least the top 3 results if any exist
+            # Update the result with calculated relevance for display
+            result['relevance_score'] = relevance
+            
+            # Use a lower threshold to be more inclusive (0.3 instead of 0.5)
+            # Also ensure we include at least the top 3 results if any exist
             if relevance < 0.3 and i > 3:
                 continue
             
-            # Update the result with calculated relevance for display
-            result['relevance_score'] = relevance
             relevant_docs.append(result)
             
             file_path = Path(result['metadata']['file_path'])
+            source_type = result['metadata'].get('type', 'note') # 'note' or 'saved_memory'
+
+            if source_type == 'saved_memory':
+                source_name = f"Saved Memory: {result['metadata'].get('memory_id', 'Unknown')}"
+                # For display, we might want to show the content directly or a snippet
+                context_part = f"### Source {i}: {source_name} (Relevance: {relevance:.2f})\n"
+                context_part += f"**Content:** {result['content']}\n"
+            else:
+                source_name = file_path.name
+                context_part = f"### Source {i}: {source_name} (Relevance: {relevance:.2f})\n"
+                context_part += f"**Content:** {result['content']}\n"
+
             tags = result['metadata'].get('tags', '[]')
-
-            context_part = f"### Source {i}: {file_path.name} (Relevance: {relevance:.2f})\n"
-            context_part += f"**Content:** {result['content']}\n"
-
             if tags and tags != '[]':
                 context_part += f"**Tags:** {tags}\n"
 

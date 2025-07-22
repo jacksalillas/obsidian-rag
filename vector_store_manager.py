@@ -79,7 +79,7 @@ class VectorStoreManager:
         logger.info(f"Added {total_added} documents to vector store in {(len(documents) + batch_size - 1) // batch_size} batches")
     
     def similarity_search(self, query: str, k: int = 5, 
-                         filter_dict: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
+                         filter_dict: Optional[Dict[str, Any]] = None, category: Optional[str] = None) -> List[Dict[str, Any]]:
         """Search for similar documents in the vector store."""
         query_embedding = self.embedding_model.encode([query], show_progress_bar=False)
         
@@ -90,8 +90,22 @@ class VectorStoreManager:
             "include": ["documents", "metadatas", "distances"]
         }
         
+        # Prepare query parameters
+        query_params = {
+            "query_embeddings": query_embedding.tolist(),
+            "n_results": k,
+            "include": ["documents", "metadatas", "distances"]
+        }
+
+        # Build the 'where' clause for filtering
+        where_clause = {}
         if filter_dict:
-            query_params["where"] = filter_dict
+            where_clause.update(filter_dict)
+        if category:
+            where_clause["category"] = category
+
+        if where_clause:
+            query_params["where"] = where_clause
         
         results = self.collection.query(**query_params)
         
@@ -164,6 +178,23 @@ class VectorStoreManager:
             logger.error(f"Error getting file_last_modified for {file_path}: {e}")
             return None
     
+    def add_saved_memory_document(self, memory_text: str, memory_id: str, category: Optional[str] = None) -> None:
+        """Add a synthesized memory document to the vector store."""
+        try:
+            embedding = self.embedding_model.encode([memory_text], show_progress_bar=False).tolist()
+            metadata = {"type": "saved_memory", "memory_id": memory_id}
+            if category:
+                metadata["category"] = category
+            self.collection.add(
+                embeddings=embedding,
+                documents=[memory_text],
+                metadatas=[metadata],
+                ids=[memory_id]
+            )
+            logger.info(f"Added saved memory document with ID: {memory_id} (Category: {category or 'None'})")
+        except Exception as e:
+            logger.error(f"Error adding saved memory document: {e}")
+
     def clear_collection(self) -> None:
         """Clear all documents from the collection."""
         try:

@@ -20,6 +20,7 @@ import ollama
 import logging
 
 logger = logging.getLogger(__name__)
+logger.setLevel(logging.WARNING) # Set default level to WARNING to hide INFO messages
 
 # Disable ChromaDB telemetry
 os.environ["ANONYMIZED_TELEMETRY"] = "False"
@@ -29,8 +30,8 @@ os.environ["CHROMA_TELEMETRY_DISABLED"] = "True"
 logging.getLogger('chromadb').setLevel(logging.CRITICAL)
 logging.getLogger('sentence_transformers').setLevel(logging.WARNING)
 
-# Set logging level for chat_interface to DEBUG
-logging.getLogger('chat_interface').setLevel(logging.DEBUG)
+# Set logging level for chat_interface to WARNING to hide INFO messages
+logging.getLogger('chat_interface').setLevel(logging.WARNING)
 
 
 from config import load_config, Config
@@ -72,7 +73,7 @@ class ObsidianRAG:
         # Clear the collection to ensure fresh indexing
         
         
-        memory_manager = MemoryManager()
+        memory_manager = MemoryManager(vector_store_manager)
         await memory_manager.async_init()
         
         chat_model = ChatModel(
