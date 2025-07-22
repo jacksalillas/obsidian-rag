@@ -10,9 +10,6 @@ from rich.markdown import Markdown
 from rich.table import Table
 from rich.progress import Progress, SpinnerColumn, TextColumn
 import logging
-import numpy as np
-from sentence_transformers import SentenceTransformer
-
 try:
     from colorama import Fore, Style, Back, init
     init(autoreset=True)
@@ -33,13 +30,12 @@ from vault_manager import VaultManager
 from vector_store_manager import VectorStoreManager
 from memory_manager import MemoryManager
 from chat_model import ChatModel
-# Removed: from embedding_model_manager import EmbeddingModelManager
 
 logger = logging.getLogger(__name__)
 
 class ChatInterface:
     def __init__(self, vault_manager: VaultManager, vector_store_manager: VectorStoreManager,
-                 memory_manager: MemoryManager, chat_model: ChatModel, embedding_manager = None):
+                 memory_manager: MemoryManager, chat_model: ChatModel, embedding_manager):
         """Initialize the chat interface."""
         self.vault_manager = vault_manager
         self.vector_store_manager = vector_store_manager
@@ -52,50 +48,6 @@ class ChatInterface:
         self.max_context_results = 12  # Upper limit for dynamic adjustment
         self.running = False
         
-        # Query-Vault Cache
-        self.query_vault_cache = {}
-        self.cache_threshold = 0.8  # Similarity threshold for cache hit
-        self.embedding_model = embedding_manager.get_model(chat_model.embedding_model_name)
-
-    def _get_cached_vault_filter(self, query: str) -> Optional[Dict[str, Any]]:
-        query_embedding = self.embedding_model.encode(query)
-        
-        best_match_vaults = None
-        best_similarity = -1
-
-        for cached_query, cached_vaults in self.query_vault_cache.items():
-            cached_query_embedding = self.embedding_model.encode(cached_query)
-            similarity = np.dot(query_embedding, cached_query_embedding) / (np.linalg.norm(query_embedding) * np.linalg.norm(cached_query_embedding))
-            
-            if similarity > best_similarity and similarity >= self.cache_threshold:
-                best_similarity = similarity
-                best_match_vaults = cached_vaults
-        
-        if best_match_vaults:
-            logger.debug(f"Cache hit for query '{query[:20]}...' with similarity {best_similarity:.2f}. Using cached vaults: {best_match_vaults}")
-            return {"determined_vault": {"$in": best_match_vaults}}
-        logger.debug(f"Cache miss for query '{query[:20]}...'.")
-        return None
-
-    def _update_query_vault_cache(self, query: str, top_vaults: List[str]):
-        if top_vaults:
-            self.query_vault_cache[query] = top_vaults
-            logger.debug(f"Updated query-vault cache for '{query[:20]}...' with vaults: {top_vaults}")
-        
-    def _extract_vault_from_query(self, query: str) -> Optional[str]:
-        """Extracts a vault name from the query if specified."""
-        # Get available vault names from vault_manager
-        available_vault_names = [Path(p).name.lower() for p in self.vault_manager.source_paths]
-        logger.debug(f"Available vault names for filtering: {available_vault_names}")
-        
-        # Check for explicit mentions like "in <vault_name> vault" or "from <vault_name>"
-        for vault_name in available_vault_names:
-            if f"in {vault_name} vault" in query.lower() or f"from {vault_name}" in query.lower():
-                logger.debug(f"Extracted target vault: {vault_name}")
-                return vault_name
-        logger.debug("No specific vault found in query.")
-        return None
-
     async def start(self):
         """Start the interactive chat interface."""
         self.running = True
@@ -134,99 +86,31 @@ class ChatInterface:
         await self._show_system_status()
     
     async def _show_system_status(self):
-        """Show current system status."""
+        """Alternative implementation with string-based content."""
         try:
-            # Get vector store stats
+            # Get system data
             vector_stats = self.vector_store_manager.get_collection_stats()
-            
-            # Get cache stats
             cache_stats = await self.chat_model.get_cache_stats()
-            
-            # Get recent conversation count
             recent_conversations = await self.memory_manager.get_recent_conversation_history(limit=10)
             
-            # Get vault sources - extract just the vault names
-            vault_names = []
-            for path in self.vault_manager.source_paths:
-                vault_names.append(Path(path).name)
-            
-            # Create the styled welcome box with colors
-            title = "Mnemosyne"
-            
-            # Helper function to get display width (accounts for emoji)
-            def get_display_width(text):
-                import unicodedata
-                width = 0
-                for char in text:
-                    if unicodedata.east_asian_width(char) in ('F', 'W'):  # Full/Wide width
-                        width += 2
-                    elif unicodedata.category(char) in ('Mn', 'Me'):  # Non-spacing marks
-                        width += 0
-                    elif ord(char) >= 0x1F600:  # Emoji range
-                        width += 2
-                    else:
-                        width += 1
-                return width
-            
-            # Prepare all content lines
+            # Get vault names
+            vault_names = [Path(path).name for path in self.vault_manager.source_paths]
             vault_names_str = ', '.join(vault_names) if vault_names else 'None'
-            sources_text = f"Sources: {vault_names_str}"
-            memories_text = f"Personal Memories: {len(recent_conversations)} saved"
             
-            content_lines = [
-                sources_text,
-                memories_text,
-                "✨ I can suggest file modifications - I'll ask for your permission first",
-                "📝 I remember our conversation context for follow-up questions", 
-                "🧠 I remember personal details you teach me permanently",
-                "",  # Empty line
-                "Memory commands: 'remember: ', 'show my memories'",
-                "System commands: 'status', 'reindex', 'bye', 'quit', 'exit', 'q'"
-            ]
+            # Create content string with Rich markup - COLORS APPLIED HERE:
+            content = f"""[bold blue] Mnemosyne - Your Personal AI Assistant[/bold blue]\n\nSources: [cyan]{vault_names_str}[/cyan]\nPersonal Memories: [magenta]{len(recent_conversations)}[/magenta] saved\n\n✨ I can suggest file modifications - I'll ask for your permission first\n📝 I remember our conversation context for follow-up questions\n🧠 I remember personal details you teach me permanently\n\n[dim]Memory commands:[/dim] [yellow]'remember: ', 'show my memories'[/yellow]\n[dim]System commands:[/dim] [yellow]'status', 'reindex', 'bye', 'quit', 'exit', 'q'[/yellow]"""
             
-            # Calculate the maximum width needed using display width
-            max_content_width = max(get_display_width(line) for line in content_lines)
-            title_width = get_display_width(f" {title} ")
-            box_width = max(max_content_width, title_width) + 4  # +4 for "│ " and " │"
-
-            # Top blue line
-            print(Fore.BLUE + "🧠 Mnemosyne - Your Personal AI Assistant" + Style.RESET_ALL)
-
-            # Top border with centered title
-            title_with_spaces = f" {title} "
-            title_padding = box_width - 2 - len(title_with_spaces)
-            left_pad = title_padding // 2
-            right_pad = title_padding - left_pad
-            print(f"┌{'─' * left_pad}{title_with_spaces}{'─' * right_pad}┐")
-
-            # Content lines with proper padding using display width
-            for i, line in enumerate(content_lines):
-                if i == 0:  # Sources line - color the values in cyan
-                    colored_part = f"{Fore.CYAN}{vault_names_str}{Style.RESET_ALL}"
-                    line_content = f" Sources: {colored_part}"
-                    # Calculate padding based on display width
-                    visible_width = get_display_width(f" Sources: {vault_names_str}")
-                    padding_needed = box_width - 2 - visible_width  # -2 for borders
-                    print(f"│{line_content}{' ' * padding_needed}│")
-                elif i == 1:  # Personal Memories line - color the number in magenta
-                    memory_count = len(recent_conversations)
-                    colored_count = f"{Fore.MAGENTA}{memory_count}{Style.RESET_ALL}"
-                    line_content = f" Personal Memories: {colored_count} saved"
-                    # Calculate padding based on display width
-                    visible_width = get_display_width(f" Personal Memories: {memory_count} saved")
-                    padding_needed = box_width - 2 - visible_width  # -2 for borders
-                    print(f"│{line_content}{' ' * padding_needed}│")
-                elif line == "":  # Empty line
-                    print(f"│{' ' * (box_width - 2)}│")
-                else:
-                    line_content = f" {line}"
-                    visible_width = get_display_width(line_content)
-                    padding_needed = box_width - 2 - visible_width
-                    print(f"│{line_content}{' ' * padding_needed}│")
+            # Create and display the panel
+            panel = Panel(
+                content,
+                title="[bold blue] Mnemosyne [/bold blue]",
+                border_style="blue",
+                padding=(1, 2),
+                expand=False
+            )
             
-            # Bottom border
-            print(f"└{'─' * (box_width - 2)}┘")
-            print()
+            self.console.print(panel)
+            self.console.print()
             
         except Exception as e:
             logger.error(f"Error showing system status: {e}")
@@ -296,28 +180,7 @@ class ChatInterface:
     async def _show_help(self):
         """Show help information."""
         help_text = """
-# Mnemosyne Help
-
-**Commands:**
-- `/help` - Show this help message
-- `/stats` - Show detailed system statistics  
-- `/clear` - Clear current conversation history
-- `/quit` or `/exit` - Exit the application
-- `/search <query>` - Search your knowledge base directly
-- `/cache` - Show cache statistics and management options
-- `/clearcache` - Clear the LLM response cache
-
-**Usage Tips:**
-- Ask questions about your notes naturally
-- Reference specific files or topics from your Obsidian vaults
-- Use keywords from your notes for better search results
-- Mnemosyne remembers context within the conversation
-
-**Examples:**
-- "What did I write about machine learning?"
-- "Summarize my notes on project management"
-- "Show me everything related to #python"
-        """
+# Mnemosyne Help\n\n**Commands:**\n- `/help` - Show this help message\n- `/stats` - Show detailed system statistics  \n- `/clear` - Clear current conversation history\n- `/quit` or `/exit` - Exit the application\n- `/search <query>` - Search your knowledge base directly\n- `/cache` - Show cache statistics and management options\n- `/clearcache` - Clear the LLM response cache\n\n**Usage Tips:**\n- Ask questions about your notes naturally\n- Reference specific files or topics from your Obsidian vaults\n- Use keywords from your notes for better search results\n- Mnemosyne remembers context within the conversation\n\n**Examples:**\n- "What did I write about machine learning?"\n- "Summarize my notes on project management"\n- "Show me everything related to #python"\n        """
         
         self.console.print(Panel(Markdown(help_text), title="Help", border_style="blue"))
     
@@ -448,67 +311,12 @@ class ChatInterface:
             else:
                 context_k = self.base_context_results
 
-            # Check cache for a relevant vault filter
-            cached_filter = self._get_cached_vault_filter(user_input)
-            
-            # Search for relevant context, applying cached filter if available
-            if cached_filter:
-                context_results = self.vector_store_manager.similarity_search(user_input, k=context_k, filter_dict=cached_filter)
-            else:
-                context_results = self.vector_store_manager.similarity_search(user_input, k=context_k)
+            # Search for relevant context
+            context_results = self.vector_store_manager.similarity_search(user_input, k=context_k)
 
-            logger.debug(f"Raw context results from similarity_search: {context_results}")
-
-            # Format context and filter by relevance (initial pass)
+            # Format context and filter by relevance
             context, relevant_docs = self._format_context_for_model(context_results)
-
-            # Analyze vault distribution among relevant documents
-            vault_scores = {}
-            for doc in relevant_docs:
-                vault = doc['metadata'].get('determined_vault', 'Unknown')
-                relevance = doc.get('relevance_score', 0)
-                vault_scores[vault] = vault_scores.get(vault, 0) + relevance
-
-            # Sort vaults by score
-            sorted_vault_scores = sorted(vault_scores.items(), key=lambda item: item[1], reverse=True)
-            logger.info(f"Vault scores: {sorted_vault_scores}")
-
-            # Re-sort relevant_docs based on vault scores for context prioritization
-            if sorted_vault_scores:
-                # Create a mapping from vault name to its score for quick lookup
-                vault_score_map = {vault: score for vault, score in sorted_vault_scores}
-                
-                # Sort relevant_docs by their vault's score, then by their own relevance score
-                relevant_docs.sort(key=lambda doc: (
-                    vault_score_map.get(doc['metadata'].get('determined_vault', 'Unknown'), 0),
-                    doc.get('relevance_score', 0)
-                ), reverse=True)
-
-                # Update query-vault cache with the top-scoring vault
-                top_vault = sorted_vault_scores[0][0]
-                self._update_query_vault_cache(user_input, [top_vault])
-
-            # Re-format context after re-sorting relevant_docs
-            context_parts = []
-            for i, result in enumerate(relevant_docs, 1):
-                file_path = Path(result['metadata']['file_path'])
-                tags = result['metadata'].get('tags', '[]')
-                relevance = result.get('relevance_score', 0)
-
-                context_part = f"### Source {i}: {file_path.name} (Relevance: {relevance:.2f})\n"
-                context_part += f"**Content:** {result['content']}\n"
-
-                if tags and tags != '[]':
-                    context_part += f"**Tags:** {tags}\n"
-
-                wiki_links = result['metadata'].get('wiki_links', '[]')
-                if wiki_links and wiki_links != '[]':
-                    context_part += f"**Links:** {wiki_links}\n"
-
-                context_parts.append(context_part)
             
-            context = "\n---\n".join(context_parts)
-
             # Debug: Log the context being sent to LLM
             if context:
                 logger.info(f"Context being sent to LLM (length: {len(context)})")
@@ -553,7 +361,75 @@ class ChatInterface:
 
             # Display response
             print()
-            self.console.print(Panel(response, title="💡 Mnemosyne says:", border_style="cyan"))
+            
+            # Helper function for display width (same as above)
+            def get_display_width(text):
+                import unicodedata
+                width = 0
+                for char in text:
+                    if unicodedata.east_asian_width(char) in ('F', 'W'):
+                        width += 2
+                    elif unicodedata.category(char) in ('Mn', 'Me'):
+                        width += 0
+                    elif ord(char) >= 0x1F600:
+                        width += 2
+                    else:
+                        width += 1
+                return width
+            
+            # Calculate dynamic width for response - use terminal width
+            import os
+            import shutil
+            
+            # Get terminal width, default to 120 if can't detect
+            try:
+                terminal_width = shutil.get_terminal_size().columns
+            except:
+                terminal_width = 120
+            
+            visible_label = "💡 Mnemosyne says:"
+            
+            # Calculate box width based on terminal width (leave some margin)
+            box_width = min(terminal_width - 4, 200)  # Max 200 chars, min margin of 4
+            
+            # Don't wrap text - display as single line(s) as needed
+            response_lines = response.split('\n')  # Only split on actual newlines from LLM
+            
+            # Top border with embedded colored label - entire box in cyan
+            colored_label = f"💡 {Fore.CYAN}Mnemosyne{Style.RESET_ALL} says:"
+            label_with_border = f"{Fore.CYAN}┌ {colored_label} "
+            
+            # Calculate remaining border width using display width
+            visible_prefix_width = get_display_width(f"┌ {visible_label} ")
+            remaining_border = box_width - visible_prefix_width - 1  # -1 for final ┐
+            
+            if remaining_border > 0:
+                top_border = label_with_border + "─" * remaining_border + f"┐{Style.RESET_ALL}"
+            else:
+                top_border = f"{Fore.CYAN}┌ {colored_label} ┐{Style.RESET_ALL}"
+            
+            print(top_border)
+            
+            # Box content - each line can be as long as the terminal allows (in cyan)
+            for line in response_lines:
+                if not line.strip():  # Handle empty lines
+                    print(f"{Fore.CYAN}│{' ' * (box_width - 2)}│{Style.RESET_ALL}")
+                else:
+                    # Truncate line if it's longer than box width allows
+                    max_content_width = box_width - 4  # -4 for "| " and " |"
+                    if len(line) > max_content_width:
+                        display_line = line[:max_content_width - 3] + "..."
+                    else:
+                        display_line = line
+                    
+                    line_display_width = get_display_width(display_line)
+                    padding_needed = box_width - 2 - line_display_width - 2  # -2 for borders, -2 for spaces
+                    if padding_needed < 0:
+                        padding_needed = 0
+                    print(f"{Fore.CYAN}│ {display_line}{' ' * padding_needed} │{Style.RESET_ALL}")
+            
+            # Bottom border (in cyan)
+            print(f"{Fore.CYAN}└{'─' * (box_width - 2)}┘{Style.RESET_ALL}")
             print()
 
             # Save to conversation history
@@ -610,3 +486,12 @@ class ChatInterface:
             context_parts.append(context_part)
 
         return "\n---\n".join(context_parts), relevant_docs
+
+import re
+
+def dim_sources_line(text):
+    """Make any line starting with 'Sources:' dimmer using regex."""
+    # Pattern matches any line starting with "Sources:" (with optional leading whitespace)
+    pattern = r'^(\s*Sources:.*)'
+    replacement = r'[dim]\1[/dim]'
+    return re.sub(pattern, replacement, text, flags=re.MULTILINE)
