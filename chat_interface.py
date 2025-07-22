@@ -118,8 +118,8 @@ class ChatInterface:
     async def _get_user_input(self) -> str:
         """Get user input with prompt."""
         try:
-            # Simple prompt to match aesthetic
-            user_input = input("Ask me anything about your vaults: 🟡 ")
+            # Use Rich's console.input for styling
+            user_input = self.console.input("[yellow]Ask me anything about your vaults: [/yellow]🟡 ")
             return user_input.strip()
         except (EOFError, KeyboardInterrupt):
             return "/quit"
