@@ -1,0 +1,56 @@
+#!/bin/bash
+
+# Mnemosyne Startup Script
+# This script starts your personal AI assistant for Obsidian
+
+echo "⚡ Starting Obsidian RAG System..."
+
+# Check if we're in the right directory
+if [ ! -f "obsidian_rag.py" ]; then
+    echo "❌ Error: Not in the correct directory. Please run this from the obsidian-rag folder."
+    exit 1
+fi
+
+# Activate virtual environment
+echo "🔧 Activating virtual environment..."
+if [ ! -d "venv" ]; then
+    echo "❌ Virtual environment not found. Please run 'python3 -m venv venv' first."
+    exit 1
+fi
+source venv/bin/activate
+echo "✅ Virtual environment activated"
+
+# Check dependencies
+echo "📦 Checking dependencies..."
+if python -c "import ollama, rich, chromadb, sentence_transformers" 2>/dev/null; then
+    echo "✅ Dependencies already installed"
+else
+    echo "❌ Missing dependencies. Please run: pip install -r requirements.txt"
+    exit 1
+fi
+
+# Check if Ollama is running
+echo "🔍 Checking Ollama status..."
+if pgrep -x "ollama" > /dev/null; then
+    echo "✅ Ollama is already running"
+else
+    echo "⚠️  Ollama is not running. Please start it with: ollama serve"
+    echo "   Then in another terminal run: ollama pull mistral:latest"
+    exit 1
+fi
+
+# Check if mistral model is available
+echo "🤖 Checking Mistral model..."
+if ollama list 2>/dev/null | grep -q "mistral:latest"; then
+    echo "✅ Mistral model already available"
+else
+    echo "❌ Mistral model not found. Please run: ollama pull mistral:latest"
+    exit 1
+fi
+
+echo "🎉 All systems ready!"
+echo "⚡ Starting Multi-Vault Obsidian RAG..."
+echo ""
+
+# Start the application
+python obsidian_rag.py "$@"
