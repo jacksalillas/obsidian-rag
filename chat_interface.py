@@ -458,7 +458,6 @@ class ChatInterface:
             
             relevant_docs.append(result)
             
-            file_path = Path(result['metadata']['file_path'])
             source_type = result['metadata'].get('type', 'note') # 'note' or 'saved_memory'
 
             if source_type == 'saved_memory':
@@ -467,6 +466,7 @@ class ChatInterface:
                 context_part = f"### Source {i}: {source_name} (Relevance: {relevance:.2f})\n"
                 context_part += f"**Content:** {result['content']}\n"
             else:
+                file_path = Path(result['metadata']['file_path'])
                 source_name = file_path.name
                 context_part = f"### Source {i}: {source_name} (Relevance: {relevance:.2f})\n"
                 context_part += f"**Content:** {result['content']}\n"
