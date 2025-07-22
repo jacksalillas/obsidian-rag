@@ -153,10 +153,27 @@ class VaultManager:
         
         documents, metadatas, ids = [], [], []
         
+        # Filter out files that haven't changed
+        files_to_index = []
+        for file_path in files_to_process:
+            current_mtime = os.path.getmtime(file_path)
+            stored_mtime = self.vector_store_manager.get_file_last_modified(str(file_path))
+            
+            if stored_mtime is None or current_mtime != stored_mtime:
+                files_to_index.append(file_path)
+            else:
+                if progress_bar:
+                    progress_bar.update(task_id, advance=1) # Still advance progress for skipped files
+        
         # Process files in parallel batches
         async def process_file_batch(file_batch):
             batch_results = []
-            tasks = [self._process_file_with_semaphore(file_path) for file_path in file_batch]
+            tasks = []
+            for file_path in file_batch:
+                # Remove old entries before processing new ones
+                self.vector_store_manager.remove_documents_by_file_path(str(file_path))
+                tasks.append(self._process_file_with_semaphore(file_path))
+
             results = await asyncio.gather(*tasks, return_exceptions=True)
             
             for i, result in enumerate(results):
@@ -172,8 +189,8 @@ class VaultManager:
         
         # Process files in concurrent batches of 20
         concurrent_batch_size = 20
-        for i in range(0, len(files_to_process), concurrent_batch_size):
-            file_batch = files_to_process[i:i + concurrent_batch_size]
+        for i in range(0, len(files_to_index), concurrent_batch_size):
+            file_batch = files_to_index[i:i + concurrent_batch_size]
             batch_results = await process_file_batch(file_batch)
             
             # Accumulate results
@@ -233,7 +250,8 @@ class VaultManager:
                 'wiki_links': json.dumps(content_data.get('wiki_links', [])),
                 'tags': json.dumps(content_data.get('tags', [])),
                 'metadata': json.dumps(content_data.get('metadata', {})),
-                'determined_vault': determined_vault # Add the determined vault to metadata
+                'determined_vault': determined_vault, # Add the determined vault to metadata
+                'file_last_modified': os.path.getmtime(file_path) # Add last modified timestamp
             })
             ids.append(doc_id)
         return documents, metadatas, ids

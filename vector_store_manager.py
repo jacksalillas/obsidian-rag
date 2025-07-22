@@ -146,6 +146,23 @@ class VectorStoreManager:
         except Exception as e:
             logger.error(f"Error getting collection stats: {e}")
             return {}
+
+    def get_file_last_modified(self, file_path: str) -> Optional[float]:
+        """Get the file_last_modified timestamp for a given file_path from the vector store."""
+        try:
+            results = self.collection.get(
+                where={
+                    "file_path": file_path
+                },
+                include=["metadatas"]
+            )
+            if results and results["metadatas"] and results["metadatas"][0]:
+                # Assuming all chunks for a file have the same last_modified timestamp
+                return results["metadatas"][0].get('file_last_modified')
+            return None
+        except Exception as e:
+            logger.error(f"Error getting file_last_modified for {file_path}: {e}")
+            return None
     
     def clear_collection(self) -> None:
         """Clear all documents from the collection."""

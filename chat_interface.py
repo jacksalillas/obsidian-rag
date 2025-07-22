@@ -360,77 +360,13 @@ class ChatInterface:
             )
 
             # Display response
-            print()
-            
-            # Helper function for display width (same as above)
-            def get_display_width(text):
-                import unicodedata
-                width = 0
-                for char in text:
-                    if unicodedata.east_asian_width(char) in ('F', 'W'):
-                        width += 2
-                    elif unicodedata.category(char) in ('Mn', 'Me'):
-                        width += 0
-                    elif ord(char) >= 0x1F600:
-                        width += 2
-                    else:
-                        width += 1
-                return width
-            
-            # Calculate dynamic width for response - use terminal width
-            import os
-            import shutil
-            
-            # Get terminal width, default to 120 if can't detect
-            try:
-                terminal_width = shutil.get_terminal_size().columns
-            except:
-                terminal_width = 120
-            
-            visible_label = "💡 Mnemosyne says:"
-            
-            # Calculate box width based on terminal width (leave some margin)
-            box_width = min(terminal_width - 4, 200)  # Max 200 chars, min margin of 4
-            
-            # Don't wrap text - display as single line(s) as needed
-            response_lines = response.split('\n')  # Only split on actual newlines from LLM
-            
-            # Top border with embedded colored label - entire box in cyan
-            colored_label = f"💡 {Fore.CYAN}Mnemosyne{Style.RESET_ALL} says:"
-            label_with_border = f"{Fore.CYAN}┌ {colored_label} "
-            
-            # Calculate remaining border width using display width
-            visible_prefix_width = get_display_width(f"┌ {visible_label} ")
-            remaining_border = box_width - visible_prefix_width - 1  # -1 for final ┐
-            
-            if remaining_border > 0:
-                top_border = label_with_border + "─" * remaining_border + f"┐{Style.RESET_ALL}"
-            else:
-                top_border = f"{Fore.CYAN}┌ {colored_label} ┐{Style.RESET_ALL}"
-            
-            print(top_border)
-            
-            # Box content - each line can be as long as the terminal allows (in cyan)
-            for line in response_lines:
-                if not line.strip():  # Handle empty lines
-                    print(f"{Fore.CYAN}│{' ' * (box_width - 2)}│{Style.RESET_ALL}")
-                else:
-                    # Truncate line if it's longer than box width allows
-                    max_content_width = box_width - 4  # -4 for "| " and " |"
-                    if len(line) > max_content_width:
-                        display_line = line[:max_content_width - 3] + "..."
-                    else:
-                        display_line = line
-                    
-                    line_display_width = get_display_width(display_line)
-                    padding_needed = box_width - 2 - line_display_width - 2  # -2 for borders, -2 for spaces
-                    if padding_needed < 0:
-                        padding_needed = 0
-                    print(f"{Fore.CYAN}│ {display_line}{' ' * padding_needed} │{Style.RESET_ALL}")
-            
-            # Bottom border (in cyan)
-            print(f"{Fore.CYAN}└{'─' * (box_width - 2)}┘{Style.RESET_ALL}")
-            print()
+            enhanced_response = dim_sources_line(response)
+            self.console.print(Panel(
+                enhanced_response, 
+                title="💡 Mnemosyne says:", 
+                title_align="left",
+                border_style="cyan"
+            ))
 
             # Save to conversation history
             await self.memory_manager.add_conversation_entry(
@@ -492,6 +428,7 @@ import re
 def dim_sources_line(text):
     """Make any line starting with 'Sources:' dimmer using regex."""
     # Pattern matches any line starting with "Sources:" (with optional leading whitespace)
-    pattern = r'^(\s*Sources:.*)'
-    replacement = r'[dim]\1[/dim]'
+    #pattern = r'^(\s*Sources:.*)'
+    pattern = r'^(\s*Sources:.*(?:\n\s*-\s*`.*)*)'
+    replacement = r'[dim]\1[/dim]' # Define replacement here
     return re.sub(pattern, replacement, text, flags=re.MULTILINE)
