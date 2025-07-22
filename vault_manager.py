@@ -74,7 +74,7 @@ class VaultManager:
             chunk_size=1000, 
             chunk_overlap=200,
             length_function=len,
-            separators=["\n\n", "\n", ". ", " ", ""]
+            separators=["\n\n", "\n", ".", " ", ""]
         )
         # Semaphore to limit concurrent file processing
         self.file_processing_semaphore = asyncio.Semaphore(10)  # Process max 10 files concurrently

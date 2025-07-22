@@ -388,38 +388,41 @@ class ChatInterface:
     async def _process_user_query(self, user_input: str):
         """Process a user query and generate a response."""
         try:
-            # Dynamic context adjustment based on query complexity
+            # Dynamic context adjustment
             query_words = len(user_input.split())
             has_question = any(word in user_input.lower() for word in ['what', 'how', 'why', 'when', 'where', 'which', 'explain', 'describe', 'compare'])
             is_complex = any(word in user_input.lower() for word in ['analyze', 'relationship', 'connection', 'summary', 'overview'])
-            
+
             if is_complex or query_words > 25:
                 context_k = min(self.max_context_results, 10)
             elif has_question or query_words > 15:
                 context_k = min(self.max_context_results, 8)
             else:
                 context_k = self.base_context_results
+
+            # Search for relevant context
+            context_results = self.vector_store_manager.similarity_search(user_input, k=context_k)
+
+            # Format context and filter by relevance
+            context, relevant_docs = self._format_context_for_model(context_results)
             
-            # Search for relevant context with dynamic k
-            context_results = self.vector_store_manager.similarity_search(
-                user_input, 
-                k=context_k
-            )
-            
-            # Format context for the model
-            context = self._format_context_for_model(context_results)
-            
-            # Get recent conversation history
+            # Debug: Log the context being sent to LLM
+            if context:
+                logger.info(f"Context being sent to LLM (length: {len(context)})")
+                logger.info(f"Context preview: {context[:300]}..." if len(context) > 300 else f"Full context: {context}")
+            else:
+                logger.info("No context being sent to LLM")
+
+            # Get conversation history
             conversation_history = await self.memory_manager.get_recent_conversation_history(limit=5)
-            
-            # Generate response with progress in exact aesthetic format
+
             print()
             print("💭 Thinking...")
-            
-            # Show referencing notes with file names and relevance
-            if context_results:
+
+            # Show referencing notes only if there are relevant documents
+            if relevant_docs:
                 file_info = []
-                for result in context_results[:3]:  # Show top 3
+                for result in relevant_docs[:3]:  # Show top 3
                     file_path = result['metadata'].get('file_path', '')
                     file_name = Path(file_path).stem if file_path else 'unknown'
                     relevance = result.get('relevance_score', 1 - result.get('distance', 0))
@@ -428,19 +431,24 @@ class ChatInterface:
                 
                 file_display = ', '.join([f"{info['name']} ({info['relevance']:.2f})" for info in file_info])
                 print(f"📚 Referencing notes: {file_display}")
-            
+            else:
+                # If no relevant documents are found, inform the user and stop.
+                self.console.print("[yellow]I couldn't find any relevant notes to answer your question.[/yellow]")
+                print()
+                return
+
             # Show progress bars (simulated)
             print("Batches: 100%|████████████████████████████████████████████████████████| 1/1 [00:00<00:00,  6.51it/s]")
             print("Batches: 100%|████████████████████████████████████████████████████████| 1/1 [00:00<00:00, 89.03it/s]")
-            
+
             response = await self.chat_model.generate_response(
                 user_input,
                 context=context,
                 conversation_history=conversation_history,
-                context_k=context_k  # Pass dynamic context setting
+                context_k=context_k
             )
-            
-            # Display response with title integrated in border
+
+            # Display response
             print()
             
             # Helper function for display width (same as above)
@@ -458,86 +466,112 @@ class ChatInterface:
                         width += 1
                 return width
             
-            # Calculate dynamic width for response
-            import textwrap
+            # Calculate dynamic width for response - use terminal width
+            import os
+            import shutil
+            
+            # Get terminal width, default to 120 if can't detect
+            try:
+                terminal_width = shutil.get_terminal_size().columns
+            except:
+                terminal_width = 120
+            
             visible_label = "💡 Mnemosyne says:"
             
-            # Fixed width for better consistency
-            box_width = 80
+            # Calculate box width based on terminal width (leave some margin)
+            box_width = min(terminal_width - 4, 200)  # Max 200 chars, min margin of 4
             
-            # Wrap text to fit
-            wrapped_lines = textwrap.wrap(response, width=box_width - 4)
+            # Don't wrap text - display as single line(s) as needed
+            response_lines = response.split('\n')  # Only split on actual newlines from LLM
             
-            # Top border with embedded colored label
+            # Top border with embedded colored label - entire box in cyan
             colored_label = f"💡 {Fore.CYAN}Mnemosyne{Style.RESET_ALL} says:"
-            label_with_border = f"┌ {colored_label} "
+            label_with_border = f"{Fore.CYAN}┌ {colored_label} "
             
             # Calculate remaining border width using display width
             visible_prefix_width = get_display_width(f"┌ {visible_label} ")
             remaining_border = box_width - visible_prefix_width - 1  # -1 for final ┐
             
             if remaining_border > 0:
-                top_border = label_with_border + "─" * remaining_border + "┐"
+                top_border = label_with_border + "─" * remaining_border + f"┐{Style.RESET_ALL}"
             else:
-                top_border = f"┌ {colored_label} ┐"
+                top_border = f"{Fore.CYAN}┌ {colored_label} ┐{Style.RESET_ALL}"
             
             print(top_border)
             
-            # Box content with display width calculations
-            for line in wrapped_lines:
-                line_display_width = get_display_width(line)
-                padding_needed = box_width - 2 - line_display_width - 2  # -2 for borders, -2 for spaces
-                if padding_needed < 0:
-                    padding_needed = 0
-                print(f"│ {line}{' ' * padding_needed} │")
+            # Box content - each line can be as long as the terminal allows (in cyan)
+            for line in response_lines:
+                if not line.strip():  # Handle empty lines
+                    print(f"{Fore.CYAN}│{' ' * (box_width - 2)}│{Style.RESET_ALL}")
+                else:
+                    # Truncate line if it's longer than box width allows
+                    max_content_width = box_width - 4  # -4 for "| " and " |"
+                    if len(line) > max_content_width:
+                        display_line = line[:max_content_width - 3] + "..."
+                    else:
+                        display_line = line
+                    
+                    line_display_width = get_display_width(display_line)
+                    padding_needed = box_width - 2 - line_display_width - 2  # -2 for borders, -2 for spaces
+                    if padding_needed < 0:
+                        padding_needed = 0
+                    print(f"{Fore.CYAN}│ {display_line}{' ' * padding_needed} │{Style.RESET_ALL}")
             
-            # Bottom border
-            print(f"└{'─' * (box_width - 2)}┘")
+            # Bottom border (in cyan)
+            print(f"{Fore.CYAN}└{'─' * (box_width - 2)}┘{Style.RESET_ALL}")
             print()
-            
-            # Save to conversation history with enhanced metadata
+
+            # Save to conversation history
             await self.memory_manager.add_conversation_entry(
-                user_input, 
-                response, 
+                user_input,
+                response,
                 metadata={
-                    "context_results": len(context_results),
+                    "context_results": len(relevant_docs), # Use count of relevant docs
                     "context_k_used": context_k,
                     "model": self.chat_model.model_name,
                     "query_complexity": "complex" if is_complex else "question" if has_question else "simple",
-                    "relevance_scores": [r.get('relevance_score', 0) for r in context_results[:3]]
+                    "relevance_scores": [r.get('relevance_score', 0) for r in relevant_docs[:3]]
                 }
             )
-            
+
         except Exception as e:
             logger.error(f"Error processing user query: {e}")
             self.console.print(f"[red]I encountered an error while processing your request: {e}[/red]")
-    
-    def _format_context_for_model(self, results: List[Dict[str, Any]]) -> str:
-        """Format search results into context for the model with enhanced metadata."""
-        if not results:
-            return ""
-        
-        context_parts = []
-        for i, result in enumerate(results, 1):
-            relevance = result.get('relevance_score', 1 - result.get('distance', 0))
-            if relevance < 0.5:
-                continue
 
+    def _format_context_for_model(self, results: List[Dict[str, Any]]) -> tuple[str, list[dict[str, Any]]]:
+        """Formats search results for the model and returns the context string and relevant documents."""
+        if not results:
+            return "", []
+
+        context_parts = []
+        relevant_docs = []
+        for i, result in enumerate(results, 1):
+            # Calculate relevance score - ChromaDB uses distance (lower = more similar)
+            distance = result.get('distance', 1.0)
+            relevance = max(0.0, 1.0 - distance)  # Convert distance to similarity
+            
+            # Use a lower threshold to be more inclusive (0.3 instead of 0.5)
+            # Also ensure we include at least the top 3 results if any exist
+            if relevance < 0.3 and i > 3:
+                continue
+            
+            # Update the result with calculated relevance for display
+            result['relevance_score'] = relevance
+            relevant_docs.append(result)
+            
             file_path = Path(result['metadata']['file_path'])
             tags = result['metadata'].get('tags', '[]')
-            
-            # Enhanced context formatting with relevance and ranking
+
             context_part = f"### Source {i}: {file_path.name} (Relevance: {relevance:.2f})\n"
             context_part += f"**Content:** {result['content']}\n"
-            
+
             if tags and tags != '[]':
                 context_part += f"**Tags:** {tags}\n"
-            
-            # Add any wiki links if available
+
             wiki_links = result['metadata'].get('wiki_links', '[]')
             if wiki_links and wiki_links != '[]':
                 context_part += f"**Links:** {wiki_links}\n"
-            
+
             context_parts.append(context_part)
-        
-        return "\n---\n".join(context_parts)
+
+        return "\n---\n".join(context_parts), relevant_docs

@@ -1,5 +1,18 @@
 import os
+# Set multiprocessing method before importing any multiprocessing-related modules
 os.environ["TQDM_DISABLE"] = "1"
+os.environ["TOKENIZERS_PARALLELISM"] = "false"  # Prevent tokenizer parallelism issues
+os.environ["OMP_NUM_THREADS"] = "1"  # Limit OpenMP threads
+os.environ["MKL_NUM_THREADS"] = "1"  # Limit MKL threads
+
+import multiprocessing
+# Set spawn method to avoid fork-related issues on macOS
+if hasattr(multiprocessing, 'set_start_method'):
+    try:
+        multiprocessing.set_start_method('spawn', force=True)
+    except RuntimeError:
+        pass  # Method already set
+
 import argparse
 from pathlib import Path
 from rich.console import Console
@@ -12,6 +25,7 @@ os.environ["CHROMA_TELEMETRY_DISABLED"] = "True"
 
 # Suppress ChromaDB telemetry logs
 logging.getLogger('chromadb').setLevel(logging.CRITICAL)
+logging.getLogger('sentence_transformers').setLevel(logging.WARNING)
 
 
 from config import load_config, Config

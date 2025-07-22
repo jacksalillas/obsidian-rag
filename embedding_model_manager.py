@@ -1,7 +1,9 @@
 import threading
+import os
 from typing import Dict, Optional
 from sentence_transformers import SentenceTransformer
 import logging
+import torch
 
 logger = logging.getLogger(__name__)
 
@@ -24,8 +26,35 @@ class EmbeddingModelManager:
             with self._lock:
                 if model_name not in self._models:
                     logger.info(f"Loading embedding model: {model_name}")
-                    self._models[model_name] = SentenceTransformer(model_name)
-                    logger.info(f"Embedding model loaded: {model_name}")
+                    try:
+                        # Configure device - prefer MPS on Apple Silicon, fallback to CPU
+                        device = 'cpu'  # Default to CPU for stability
+                        if torch.backends.mps.is_available():
+                            device = 'mps'
+                        elif torch.cuda.is_available():
+                            device = 'cuda'
+                        
+                        # Load model with explicit device configuration
+                        model = SentenceTransformer(model_name, device=device)
+                        
+                        # Set model to evaluation mode for inference
+                        model.eval()
+                        
+                        self._models[model_name] = model
+                        logger.info(f"Embedding model loaded: {model_name} on device: {device}")
+                        
+                    except Exception as e:
+                        logger.error(f"Failed to load embedding model {model_name}: {e}")
+                        # Fallback to CPU-only loading
+                        try:
+                            logger.info(f"Retrying {model_name} with CPU-only mode...")
+                            model = SentenceTransformer(model_name, device='cpu')
+                            model.eval()
+                            self._models[model_name] = model
+                            logger.info(f"Embedding model loaded: {model_name} on CPU (fallback)")
+                        except Exception as e2:
+                            logger.error(f"Failed to load embedding model {model_name} even with CPU: {e2}")
+                            raise RuntimeError(f"Could not load embedding model {model_name}: {e2}")
         
         return self._models[model_name]
     
